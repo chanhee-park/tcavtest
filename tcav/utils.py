@@ -17,7 +17,7 @@ limitations under the License.
 from scipy.stats import ttest_ind
 import numpy as np
 import tensorflow as tf
-from tcav_results.results_pb2 import Result, Results
+from tcav.tcav_results.results_pb2 import Result, Results
 
 _KEYS = [
     "cav_key", "cav_concept", "negative_concept", "target_class", "i_up",
@@ -37,13 +37,13 @@ def create_session(timeout=10000, interactive=True):
     TF session.
   """
   graph = tf.Graph()
-  config = tf.ConfigProto()
+  config = tf.compat.v1.ConfigProto()
   config.gpu_options.allow_growth = True
   config.operation_timeout_in_ms = int(timeout*1000)
   if interactive:
-    return tf.InteractiveSession(graph=graph, config=config)
+    return tf.compat.v1.InteractiveSession(graph=graph, config=config)
   else:
-    return tf.Session(graph=graph, config=config)
+    return tf.compat.v1.Session(graph=graph, config=config)
 
 
 def flatten(nested_list):
@@ -97,7 +97,7 @@ def process_what_to_run_expand(pairs_to_test,
     elif len(concept_set) > 1:
       new_pairs_to_test_t.append((target, concept_set))
     else:
-      tf.logging.info('PAIR NOT PROCCESSED')
+      tf.compat.v1.logging.info('PAIR NOT PROCCESSED')
     new_pairs_to_test.extend(new_pairs_to_test_t)
 
   all_concepts = list(set(flatten([cs + [tc] for tc, cs in new_pairs_to_test])))
@@ -227,8 +227,8 @@ def print_results(results, random_counterpart=None, random_concepts=None, num_ra
 
 
 def make_dir_if_not_exists(directory):
-  if not tf.gfile.Exists(directory):
-    tf.gfile.MakeDirs(directory)
+  if not tf.io.gfile.exists(directory):
+    tf.io.gfile.makedirs(directory)
 
 
 def result_to_proto(result):

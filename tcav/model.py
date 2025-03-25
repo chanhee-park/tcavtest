@@ -1,5 +1,4 @@
-"""
-Copyright 2018 Google LLC
+"""Copyright 2018 Google LLC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -82,26 +81,26 @@ class ModelWrapper(six.with_metaclass(ABCMeta, object)):
     ommitted, child wrapper is responsible for loading the model.
     """
     try:
-      self.sess = tf.Session(graph=tf.Graph())
+      self.sess = tf.compat.v1.Session(graph=tf.Graph())
       with self.sess.graph.as_default():
-        if tf.gfile.IsDirectory(model_path):
+        if tf.io.gfile.isdir(model_path):
           ckpt = tf.train.latest_checkpoint(model_path)
           if ckpt:
-            tf.logging.info('Loading from the latest checkpoint.')
-            saver = tf.train.import_meta_graph(ckpt + '.meta')
+            tf.compat.v1.logging.info('Loading from the latest checkpoint.')
+            saver = tf.compat.v1.train.import_meta_graph(ckpt + '.meta')
             saver.restore(self.sess, ckpt)
           else:
-            tf.logging.info('Loading from SavedModel dir.')
-            tf.saved_model.loader.load(self.sess, ['serve'], model_path)
+            tf.compat.v1.logging.info('Loading from SavedModel dir.')
+            tf.compat.v1.saved_model.loader.load(self.sess, ['serve'], model_path)
         else:
-          input_graph_def = tf.GraphDef()
+          input_graph_def = tf.compat.v1.GraphDef()
           if model_path.endswith('.pb'):
-            tf.logging.info('Loading from frozen binary graph.')
-            with tf.gfile.FastGFile(model_path, 'rb') as f:
+            tf.compat.v1.logging.info('Loading from frozen binary graph.')
+            with tf.io.gfile.GFile(model_path, 'rb') as f:
               input_graph_def.ParseFromString(f.read())
           else:
-            tf.logging.info('Loading from frozen text graph.')
-            with tf.gfile.FastGFile(model_path) as f:
+            tf.compat.v1.logging.info('Loading from frozen text graph.')
+            with tf.io.gfile.GFile(model_path) as f:
               text_format.Parse(f.read(), input_graph_def)
           tf.import_graph_def(input_graph_def)
           self.import_prefix = True
@@ -110,7 +109,7 @@ class ModelWrapper(six.with_metaclass(ABCMeta, object)):
       template = 'An exception of type {0} occurred ' \
                  'when trying to load model from {1}. ' \
                  'Arguments:\n{2!r}'
-      tf.logging.warn(template.format(type(e).__name__, model_path, e.args))
+      tf.compat.v1.logging.warn(template.format(type(e).__name__, model_path, e.args))
 
   def _find_ends_and_bottleneck_tensors(self, node_dict):
     """ Find tensors from the graph by their names.
@@ -123,7 +122,7 @@ class ModelWrapper(six.with_metaclass(ABCMeta, object)):
     """
     self.bottlenecks_tensors = {}
     self.ends = {}
-    for k, v in node_dict.iteritems():
+    for k, v in six.iteritems(node_dict):
       if self.import_prefix:
         v = 'import/' + v
       tensor = self.sess.graph.get_operation_by_name(v.strip(':0')).outputs[0]
@@ -133,12 +132,12 @@ class ModelWrapper(six.with_metaclass(ABCMeta, object)):
         self.bottlenecks_tensors[k] = tensor
 
   def _make_gradient_tensors(self):
-    """Makes gradient tensors for all bottleneck tensors.
-    """
+    """Makes gradient tensors for all bottleneck tensors."""
+
     self.bottlenecks_gradients = {}
     for bn in self.bottlenecks_tensors:
       self.bottlenecks_gradients[bn] = tf.gradients(
-          self.loss, self.bottlenecks_tensors[bn])[0]
+          ys=self.loss, xs=self.bottlenecks_tensors[bn])[0]
 
   def get_gradient(self, acts, y, bottleneck_name, example):
     """Return the gradient of the loss with respect to the bottleneck_name.
@@ -200,7 +199,7 @@ class ModelWrapper(six.with_metaclass(ABCMeta, object)):
     Override this method if label to id mapping is known. Otherwise,
     default id 0 is used.
     """
-    tf.logging.warn('label_to_id undefined. Defaults to returning 0.')
+    tf.compat.v1.logging.warn('label_to_id undefined. Defaults to returning 0.')
     return 0
 
 
@@ -239,32 +238,25 @@ class ImageModelWrapper(ModelWrapper):
 
 
 class PublicImageModelWrapper(ImageModelWrapper):
-  """Simple wrapper of the public image models with session object.
-  """
-  def __init__(self,
-               sess,
-               model_fn_path,
-               labels_path,
-               image_shape,
-               endpoints_dict,
-               scope):
+  """Simple wrapper of the public image models with session object."""
+
+  def __init__(self, sess, model_fn_path, labels_path, image_shape,
+               endpoints_dict, scope):
     super(PublicImageModelWrapper, self).__init__(image_shape)
-    self.labels = tf.gfile.Open(labels_path).read().splitlines()
-    self.ends = PublicImageModelWrapper.import_graph(model_fn_path,
-                                                     endpoints_dict,
-                                                     self.image_value_range,
-                                                     scope=scope)
+    self.labels = tf.io.gfile.GFile(labels_path).read().splitlines()
+    self.ends = PublicImageModelWrapper.import_graph(
+        model_fn_path, endpoints_dict, self.image_value_range, scope=scope)
     self.bottlenecks_tensors = PublicImageModelWrapper.get_bottleneck_tensors(
         scope)
-    graph = tf.get_default_graph()
+    graph = tf.compat.v1.get_default_graph()
 
     # Construct gradient ops.
     with graph.as_default():
-      self.y_input = tf.placeholder(tf.int64, shape=[None])
+      self.y_input = tf.compat.v1.placeholder(tf.int64, shape=[None])
 
       self.pred = tf.expand_dims(self.ends['prediction'][0], 0)
       self.loss = tf.reduce_mean(
-          tf.nn.softmax_cross_entropy_with_logits(
+          input_tensor=tf.compat.v1.nn.softmax_cross_entropy_with_logits_v2(
               labels=tf.one_hot(
                   self.y_input,
                   self.ends['prediction'].get_shape().as_list()[1]),
@@ -290,7 +282,7 @@ class PublicImageModelWrapper(ImageModelWrapper):
       t_prep_input = tf.expand_dims(t_prep_input, 0)
     t_prep_input = forget_xy(t_prep_input)
     lo, hi = image_value_range
-    t_prep_input = lo + t_prep_input * (hi-lo)
+    t_prep_input = lo + t_prep_input * (hi - lo)
     return t_input, t_prep_input
 
 
@@ -298,10 +290,10 @@ class PublicImageModelWrapper(ImageModelWrapper):
   @staticmethod
   def get_bottleneck_tensors(scope):
     """Add Inception bottlenecks and their pre-Relu versions to endpoints dict."""
-    graph = tf.get_default_graph()
+    graph = tf.compat.v1.get_default_graph()
     bn_endpoints = {}
     for op in graph.get_operations():
-      if op.name.startswith(scope+'/') and 'Concat' in op.type:
+      if op.name.startswith(scope + '/') and 'Concat' in op.type:
         name = op.name.split('/')[1]
         bn_endpoints[name] = op.outputs[0]
     return bn_endpoints
@@ -309,15 +301,16 @@ class PublicImageModelWrapper(ImageModelWrapper):
   # Load graph and import into graph used by our session
   @staticmethod
   def import_graph(saved_path, endpoints, image_value_range, scope='import'):
-    t_input = tf.placeholder(np.float32, [None, None, None, 3])
+    t_input = tf.compat.v1.placeholder(np.float32, [None, None, None, 3])
     graph = tf.Graph()
     assert graph.unique_name(scope, False) == scope, (
         'Scope "%s" already exists. Provide explicit scope names when '
         'importing multiple instances of the model.') % scope
 
-    graph_def = tf.GraphDef.FromString(tf.gfile.Open(saved_path, 'rb').read())
+    graph_def = tf.compat.v1.GraphDef.FromString(
+        tf.io.gfile.GFile(saved_path, 'rb').read())
 
-    with tf.name_scope(scope) as sc:
+    with tf.compat.v1.name_scope(scope) as sc:
       t_input, t_prep_input = PublicImageModelWrapper.create_input(
           t_input, image_value_range)
 
@@ -330,11 +323,11 @@ class PublicImageModelWrapper(ImageModelWrapper):
     return myendpoints
 
 
-class GoolgeNetWrapper_public(PublicImageModelWrapper):
+class GoogleNetWrapper_public(PublicImageModelWrapper):
 
   def __init__(self, sess, model_saved_path, labels_path):
     image_shape_v1 = [224, 224, 3]
-    self.image_value_range = (-117, 255-117)
+    self.image_value_range = (-117, 255 - 117)
     endpoints_v1 = dict(
         input='input:0',
         logit='softmax2_pre_activation:0',
@@ -344,12 +337,13 @@ class GoolgeNetWrapper_public(PublicImageModelWrapper):
         logit_bias='softmax2_b:0',
     )
     self.sess = sess
-    super(GoolgeNetWrapper_public, self).__init__(sess,
-                                                  model_saved_path,
-                                                  labels_path,
-                                                  image_shape_v1,
-                                                  endpoints_v1,
-                                                  scope='v1')
+    super(GoogleNetWrapper_public, self).__init__(
+        sess,
+        model_saved_path,
+        labels_path,
+        image_shape_v1,
+        endpoints_v1,
+        scope='v1')
     self.model_name = 'GoogleNet_public'
 
   def adjust_prediction(self, pred_t):
@@ -371,10 +365,111 @@ class InceptionV3Wrapper_public(PublicImageModelWrapper):
     )
 
     self.sess = sess
-    super(InceptionV3Wrapper_public, self).__init__(sess,
-                                                  model_saved_path,
-                                                  labels_path,
-                                                  image_shape_v3,
-                                                  endpoints_v3,
-                                                  scope='v3')
+    super(InceptionV3Wrapper_public, self).__init__(
+        sess,
+        model_saved_path,
+        labels_path,
+        image_shape_v3,
+        endpoints_v3,
+        scope='v3')
     self.model_name = 'InceptionV3_public'
+
+
+class MobilenetV2Wrapper_public(PublicImageModelWrapper):
+
+  def __init__(self, sess, model_saved_path, labels_path):
+    self.image_value_range = (-1, 1)
+    image_shape_v2 = [224, 224, 3]
+    endpoints_v2 = dict(
+        input='input:0',
+        prediction='MobilenetV2/Predictions/Reshape:0',
+    )
+
+    self.sess = sess
+    super(MobilenetV2Wrapper_public, self).__init__(
+        sess,
+        model_saved_path,
+        labels_path,
+        image_shape_v2,
+        endpoints_v2,
+        scope='MobilenetV2')
+
+    # define bottleneck tensors and their gradients
+    self.bottlenecks_tensors = self.get_bottleneck_tensors_mobilenet(
+        scope='MobilenetV2')
+    # Construct gradient ops.
+    g = tf.compat.v1.get_default_graph()
+    self._make_gradient_tensors()
+    self.model_name = 'MobilenetV2_public'
+
+  @staticmethod
+  def get_bottleneck_tensors_mobilenet(scope):
+    """Add Inception bottlenecks and their pre-Relu versions to endpoints dict."""
+    graph = tf.compat.v1.get_default_graph()
+    bn_endpoints = {}
+    for op in graph.get_operations():
+      if 'add' in op.name and 'gradients' not in op.name and 'add' == op.name.split(
+          '/')[-1]:
+        name = op.name.split('/')[-2]
+        bn_endpoints[name] = op.outputs[0]
+    return bn_endpoints
+
+
+class KerasModelWrapper(ModelWrapper):
+  """ ModelWrapper for keras models
+
+    By default, assumes that your model contains one input node, one output head
+    and one loss function.
+    Computes gradients of the output layer in respect to a CAV.
+
+    Args:
+        sess: Tensorflow session we will use for TCAV.
+        model_path: Path to your model.h5 file, containing a saved trained
+          model.
+        labels_path: Path to a file containing the labels for your problem. It
+          requires a .txt file, where every line contains a label for your
+          model. You want to make sure that the order of labels in this file
+          matches with the logits layers for your model, such that file[i] ==
+          model_logits[i]
+  """
+
+  def __init__(
+      self,
+      sess,
+      model_path,
+      labels_path,
+  ):
+    self.sess = sess
+    super(KerasModelWrapper, self).__init__()
+    self.import_keras_model(model_path)
+    self.labels = tf.io.gfile.GFile(labels_path).read().splitlines()
+
+    # Construct gradient ops. Defaults to using the model's output layer
+    self.y_input = tf.compat.v1.placeholder(tf.int64, shape=[None])
+    self.loss = self.model.loss_functions[0](self.y_input,
+                                             self.model.outputs[0])
+    self._make_gradient_tensors()
+
+  def id_to_label(self, idx):
+    return self.labels[idx]
+
+  def label_to_id(self, label):
+    return self.labels.index(label)
+
+  def import_keras_model(self, saved_path):
+    """Loads keras model, fetching bottlenecks, inputs and outputs."""
+    self.ends = {}
+    self.model = tf.keras.models.load_model(saved_path)
+    self.get_bottleneck_tensors()
+    self.get_inputs_and_outputs_and_ends()
+
+  def get_bottleneck_tensors(self):
+    self.bottlenecks_tensors = {}
+    layers = self.model.layers
+    for layer in layers:
+      if 'input' not in layer.name:
+        self.bottlenecks_tensors[layer.name] = layer.output
+
+  def get_inputs_and_outputs_and_ends(self):
+    self.ends['input'] = self.model.inputs[0]
+    self.ends['prediction'] = self.model.outputs[0]

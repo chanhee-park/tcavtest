@@ -45,7 +45,7 @@ class CAV(object):
     Returns:
       TF.HParams for training.
     """
-    return tf.contrib.training.HParams(model_type='linear', alpha=.01, max_iter=1000, tol=1e-3)
+    return {'model_type':'linear', 'alpha':.01, 'max_iter':1000, 'tol':1e-3}
 
   @staticmethod
   def load_cav(cav_path):
@@ -57,7 +57,7 @@ class CAV(object):
     Returns:
       CAV instance.
     """
-    with tf.gfile.Open(cav_path, 'rb') as pkl_file:
+    with tf.io.gfile.GFile(cav_path, 'rb') as pkl_file:
       save_dict = pickle.load(pkl_file)
 
     cav = CAV(save_dict['concepts'], save_dict['bottleneck'],
@@ -97,9 +97,9 @@ class CAV(object):
     """
     cav_path = os.path.join(
         cav_dir,
-        CAV.cav_key(concepts, bottleneck, cav_hparams.model_type,
-                    cav_hparams.alpha) + '.pkl')
-    return tf.gfile.Exists(cav_path)
+        CAV.cav_key(concepts, bottleneck, cav_hparams['model_type'],
+                    cav_hparams['alpha']) + '.pkl')
+    return tf.io.gfile.exists(cav_path)
 
   @staticmethod
   def _create_cav_training_set(concepts, bottleneck, acts):
@@ -161,17 +161,17 @@ class CAV(object):
       ValueError: if the model_type in hparam is not compatible.
     """
 
-    tf.logging.info('training with alpha={}'.format(self.hparams.alpha))
+    tf.compat.v1.logging.info('training with alpha={}'.format(self.hparams['alpha']))
     x, labels, labels2text = CAV._create_cav_training_set(
         self.concepts, self.bottleneck, acts)
 
-    if self.hparams.model_type == 'linear':
-      lm = linear_model.SGDClassifier(alpha=self.hparams.alpha, max_iter=self.hparams.max_iter, tol=self.hparams.tol)
-    elif self.hparams.model_type == 'logistic':
+    if self.hparams['model_type'] == 'linear':
+      lm = linear_model.SGDClassifier(alpha=self.hparams['alpha'], max_iter=self.hparams['max_iter'], tol=self.hparams['tol'])
+    elif self.hparams['model_type'] == 'logistic':
       lm = linear_model.LogisticRegression()
     else:
       raise ValueError('Invalid hparams.model_type: {}'.format(
-          self.hparams.model_type))
+          self.hparams['model_type']))
 
     self.accuracies = self._train_lm(lm, x, labels, labels2text)
     if len(lm.coef_) == 1:
@@ -201,8 +201,8 @@ class CAV(object):
   def get_key(self):
     """Returns cav_key."""
 
-    return CAV.cav_key(self.concepts, self.bottleneck, self.hparams.model_type,
-                       self.hparams.alpha)
+    return CAV.cav_key(self.concepts, self.bottleneck, self.hparams['model_type'],
+                       self.hparams['alpha'])
 
   def get_direction(self, concept):
     """Get CAV direction.
@@ -226,10 +226,10 @@ class CAV(object):
         'saved_path': self.save_path
     }
     if self.save_path is not None:
-      with tf.gfile.Open(self.save_path, 'w') as pkl_file:
+      with tf.io.gfile.GFile(self.save_path, 'w') as pkl_file:
         pickle.dump(save_dict, pkl_file)
     else:
-      tf.logging.info('save_path is None. Not saving anything')
+      tf.compat.v1.logging.info('save_path is None. Not saving anything')
 
   def _train_lm(self, lm, x, y, labels2text):
     """Train a model to get CAVs.
@@ -267,7 +267,7 @@ class CAV(object):
       # overall correctness is weighted by the number of examples in this class.
       num_correct += (sum(idx) * acc[labels2text[class_id]])
     acc['overall'] = float(num_correct) / float(len(y_test))
-    tf.logging.info('acc per class %s' % (str(acc)))
+    tf.compat.v1.logging.info('acc per class %s' % (str(acc)))
     return acc
 
 
@@ -304,18 +304,18 @@ def get_or_train_cav(concepts,
     utils.make_dir_if_not_exists(cav_dir)
     cav_path = os.path.join(
         cav_dir,
-        CAV.cav_key(concepts, bottleneck, cav_hparams.model_type,
-                    cav_hparams.alpha).replace('/', '.') + '.pkl')
+        CAV.cav_key(concepts, bottleneck, cav_hparams['model_type'],
+                    cav_hparams['alpha']).replace('/', '.') + '.pkl')
 
-    if not overwrite and tf.gfile.Exists(cav_path):
-      tf.logging.info('CAV already exists: {}'.format(cav_path))
+    if not overwrite and tf.io.gfile.exists(cav_path):
+      tf.compat.v1.logging.info('CAV already exists: {}'.format(cav_path))
       cav_instance = CAV.load_cav(cav_path)
-      tf.logging.info('CAV accuracies: {}'.format(cav_instance.accuracies))
+      tf.compat.v1.logging.info('CAV accuracies: {}'.format(cav_instance.accuracies))
       return cav_instance
 
-  tf.logging.info('Training CAV {} - {} alpha {}'.format(
-      concepts, bottleneck, cav_hparams.alpha))
+  tf.compat.v1.logging.info('Training CAV {} - {} alpha {}'.format(
+      concepts, bottleneck, cav_hparams['alpha']))
   cav_instance = CAV(concepts, bottleneck, cav_hparams, cav_path)
   cav_instance.train({c: acts[c] for c in concepts})
-  tf.logging.info('CAV accuracies: {}'.format(cav_instance.accuracies))
+  tf.compat.v1.logging.info('CAV accuracies: {}'.format(cav_instance.accuracies))
   return cav_instance
